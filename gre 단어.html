@@ -286,20 +286,55 @@
   function $(id){ return document.getElementById(id); }
   var MAXLV = 5;
 
-  // 단어별 표시 단계(0~5)를 브라우저에 저장한다
-  var STORE_KEY = 'words-level-v1';
-  var levels = (function(){
-    try { return JSON.parse(localStorage.getItem(STORE_KEY)) || {}; }
-    catch (e){ return {}; }
-  })();
-  function saveLevels(){
-    try { localStorage.setItem(STORE_KEY, JSON.stringify(levels)); } catch (e){}
-  }
-  function levelOf(o){ return levels[o.w] || 0; }
-  function setLevel(o, lv){
-    if (lv <= 0) delete levels[o.w]; else levels[o.w] = lv;
-    saveLevels();
-  }
+  // 단어별 표시 단계(0~5)를 브라우저 + 구글 시트에 저장한다
+var SYNC_URL = 'https://script.google.com/macros/s/AKfycbxOLaHLiUJBaQ9tgPZflkOnmKwK0DK1rzg3xmqZOtzsAcdLTIIGpHZ8idOj7zO08Rjy/exec'; // .../exec
+
+var STORE_KEY = 'words-level-v1';
+var levels = (function(){
+  try { return JSON.parse(localStorage.getItem(STORE_KEY)) || {}; }
+  catch (e){ return {}; }
+})();
+function saveLevels(){
+  try { localStorage.setItem(STORE_KEY, JSON.stringify(levels)); } catch (e){}
+  syncToCloud();
+}
+function levelOf(o){ return levels[o.w] || 0; }
+function setLevel(o, lv){
+  if (lv <= 0) delete levels[o.w]; else levels[o.w] = lv;
+  saveLevels();
+}
+
+// ---- 구글 시트로 동기화 ----
+var syncTimer = null;
+function syncToCloud(){
+  if (!SYNC_URL) return;
+  clearTimeout(syncTimer);
+  // 연속으로 여러 번 누를 때 요청을 하나로 모아서 보낸다 (0.4초 대기)
+  syncTimer = setTimeout(function(){
+    fetch(SYNC_URL, {
+      method: 'POST',
+      body: JSON.stringify(levels),
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' }
+    }).catch(function(){});
+  }, 400);
+}
+function pullFromCloud(){
+  if (!SYNC_URL) return;
+  fetch(SYNC_URL)
+  .then(function(r){ return r.json(); })
+  .then(function(cloud){
+    var changed = false;
+    for (var w in cloud){
+      if (levels[w] !== cloud[w]){ levels[w] = cloud[w]; changed = true; }
+    }
+    if (changed){
+      try { localStorage.setItem(STORE_KEY, JSON.stringify(levels)); } catch (e){}
+      applyFilter();
+    }
+  })
+  .catch(function(){});
+}
+}
   var list = $('list'), sentinel = $('sentinel'), card = $('card');
 
 
@@ -575,6 +610,7 @@
 
   setDayLabels(false);
   applyFilter();
+  pullFromCloud();
 })();
 </script>
 </body>
