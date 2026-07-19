@@ -1,0 +1,1152 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>딕테이션 메이커 — 오디오 넣으면 받아쓰기</title>
+<style>
+  :root{
+    --bg:#f7f7f5; --card:#ffffff; --ink:#191919; --muted:#757572; --line:#e4e4e0;
+    --accent:#191919; --accent-ink:#ffffff;
+    --ok:#2e7d54; --okbg:#eef6f1; --warn:#9a7420; --bad:#b3392c;
+    --shadow:0 1px 2px rgba(0,0,0,.04),0 4px 16px rgba(0,0,0,.04);
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#131313; --card:#1c1c1c; --ink:#ececec; --muted:#969692; --line:#2e2e2c;
+      --accent:#ececec; --accent-ink:#131313;
+      --ok:#6cc296; --okbg:#1d2b23; --warn:#d8b45e; --bad:#e07a6e;
+      --shadow:0 1px 2px rgba(0,0,0,.4),0 6px 20px rgba(0,0,0,.35);
+    }
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--ink);line-height:1.6;font-size:16px;
+       font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans KR","Malgun Gothic",Roboto,sans-serif;
+       -webkit-font-smoothing:antialiased}
+  .wrap{max-width:1000px;margin:0 auto;padding:40px 20px 110px}
+  header{display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap}
+  header h1{margin:0 0 4px;font-size:24px;font-weight:750;letter-spacing:-.4px}
+  header p{margin:0;color:var(--muted);font-size:14.5px}
+  /* view toggle knob: left = 오디오 분석, right = 딕테이션 */
+  .knob{position:relative;width:50px;height:26px;border:1px solid var(--line);border-radius:99px;
+        background:var(--card);cursor:pointer;padding:0;flex:none;
+        transition:background .18s,border-color .18s}
+  .knob::after{content:"";position:absolute;top:2px;left:2px;width:20px;height:20px;border-radius:50%;
+               background:var(--muted);transition:left .18s,background .18s}
+  .knob.on{background:var(--accent);border-color:var(--accent)}
+  .knob.on::after{left:26px;background:var(--accent-ink)}
+  .knob:disabled{opacity:.35;cursor:default}
+  /* AI-prompt round button + modal */
+  .obtn{width:22px;height:22px;border-radius:50%;border:1.5px solid var(--muted);background:transparent;
+        cursor:pointer;padding:0;flex:none;transition:border-color .15s}
+  .obtn:hover{border-color:var(--ink)}
+  .tbtn{width:auto;height:30px;border:none;background:transparent;cursor:pointer;padding:0;flex:none;
+        color:var(--muted);font-size:23px;font-weight:400;line-height:30px;transition:color .15s}
+  .tbtn:hover{color:var(--ink)}
+  .pmodal{position:fixed;inset:0;z-index:40;background:rgba(0,0,0,.35);
+          display:flex;align-items:center;justify-content:center;padding:20px}
+  .pbox{background:var(--card);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);
+        width:min(640px,100%);padding:18px 20px}
+  .phead{display:flex;align-items:center;gap:8px;margin-bottom:10px}
+  .phead b{font-size:15px}
+  .phead .ic{margin-left:auto;border:1px solid var(--line);background:none;color:var(--ink);
+             border-radius:7px;width:30px;height:28px;cursor:pointer;font-size:14px;line-height:1}
+  .phead .ic:hover{border-color:var(--ink)}
+  .pbox textarea{height:300px;resize:vertical}
+
+  /* ---- setup / import ---- */
+  .setup{margin-top:30px}
+  .drop{border:1.5px dashed var(--line);border-radius:14px;padding:46px 22px;text-align:center;
+        cursor:pointer;color:var(--muted);background:var(--card);
+        transition:border-color .18s,box-shadow .18s,transform .18s}
+  .drop:hover,.drop.hot{border-color:var(--ink);box-shadow:var(--shadow)}
+  .drop.hot{transform:scale(1.005)}
+  .drop b{color:var(--ink);font-weight:650;font-size:16.5px}
+  .drop small{display:block;margin-top:8px;font-size:12.5px;letter-spacing:.1px}
+  .opt{margin-top:26px}
+  .opt h3{margin:0 0 10px;font-size:14px;font-weight:650;color:var(--muted);
+          text-transform:uppercase;letter-spacing:.6px}
+  .go{margin-top:26px;display:flex;gap:10px;align-items:center;justify-content:center}
+  .status{margin-top:18px;font-size:13.5px;color:var(--muted);min-height:20px;
+          font-variant-numeric:tabular-nums}
+  .status.err{color:var(--bad)}
+  .pbar{height:6px;background:var(--line);border-radius:99px;overflow:hidden;margin-top:10px;display:none}
+  .pbar.show{display:block}
+  .pbar>i{display:block;height:100%;width:0;background:var(--accent);border-radius:99px;transition:width .25s ease}
+
+  /* ---- controls ---- */
+  select,input[type=text]{font:inherit;font-size:14px;padding:5px 9px;border:1px solid var(--line);
+         background:var(--card);color:var(--ink);border-radius:8px;outline:none;
+         transition:border-color .15s}
+  select:hover,select:focus,input[type=text]:focus{border-color:var(--ink)}
+  .btn{border:1px solid var(--line);background:var(--card);color:var(--ink);
+       font:inherit;font-size:13.5px;font-weight:550;padding:5px 14px;border-radius:8px;cursor:pointer;
+       transition:border-color .15s,background .15s,color .15s,box-shadow .15s}
+  .btn:hover{border-color:var(--ink)}
+  .btn:active{transform:translateY(.5px)}
+  .btn.dark{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+  .btn.dark:hover{box-shadow:var(--shadow)}
+  .btn.del{margin-left:auto;color:var(--muted);padding:3px 10px;font-size:14px;line-height:1;border-color:transparent}
+  .btn.del:hover{color:var(--bad);border-color:var(--bad)}
+  .btn.ghost{border-color:transparent;color:var(--muted)}
+  .btn.ghost:hover{color:var(--bad);border-color:var(--bad)}
+
+  /* ---- practice bar ---- */
+  .bar{position:sticky;top:0;z-index:5;background:color-mix(in srgb,var(--bg) 88%,transparent);
+       backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
+       padding:14px 0 10px;margin:20px 0 6px;border-bottom:1px solid var(--line);
+       display:flex;gap:14px;align-items:center;flex-wrap:wrap;font-size:14px}
+  .bar label{color:var(--muted);display:inline-flex;gap:7px;align-items:center;font-size:13.5px}
+  .bar select{width:60px}
+  .bar #filter{width:120px}
+  .ratebox{display:flex;gap:8px;align-items:center}
+  .rate{font-size:13px;color:var(--ink);border:1px solid var(--line);border-radius:8px;
+        padding:4px 12px;background:var(--card);font-variant-numeric:tabular-nums}
+  .rate b{font-weight:700}
+  .progress{margin-left:auto;font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums}
+  .progress b{color:var(--ink);font-weight:650}
+  .track{height:4px;background:var(--line);border-radius:99px;overflow:hidden;flex-basis:100%}
+  .track>i{display:block;height:100%;width:0;background:var(--accent);border-radius:99px;transition:width .3s}
+  .hint{color:var(--muted);font-size:12.5px;margin-top:6px}
+  kbd{border:1px solid var(--line);border-bottom-width:2px;border-radius:5px;padding:0 6px;
+      font-size:11.5px;font-family:inherit;background:var(--card)}
+
+  /* ---- cards ---- */
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;
+        padding:16px 18px;margin:12px 0;box-shadow:var(--shadow);
+        transition:border-color .2s}
+  .card.done{border-color:var(--ok)}
+  .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .meta{font-size:12.5px;color:var(--muted);letter-spacing:.2px;font-variant-numeric:tabular-nums}
+  .selwrap{display:inline-flex;align-items:center;cursor:pointer;padding:2px}
+  .selbox{appearance:none;-webkit-appearance:none;width:18px;height:18px;margin:0;cursor:pointer;
+          border:1.5px solid var(--muted);border-radius:50%;background:transparent;
+          position:relative;transition:border-color .15s}
+  .selbox:hover{border-color:var(--ink)}
+  .selbox:checked{border-color:var(--ink)}
+  .selbox:checked::after{content:"";position:absolute;inset:3.5px;border-radius:50%;background:var(--ink)}
+  textarea{width:100%;padding:10px 13px;border:1px solid var(--line);border-radius:9px;
+           background:var(--bg);color:var(--ink);font:inherit;font-size:15.5px;line-height:1.6;
+           transition:border-color .15s}
+  textarea:focus{outline:none;border-color:var(--ink);background:var(--card)}
+  .card textarea{margin-top:12px;height:calc(1.6em*3 + 22px);resize:none;overflow-y:auto}
+  .result{margin-top:12px;font-size:15px;display:none}
+  .result.show{display:block}
+  .score{font-weight:700;margin-bottom:6px;font-size:14px}
+  .diff w{padding:0 1px}
+  .diff .g{color:var(--ok)}
+  .diff .y{color:var(--warn)}
+  .diff .m{color:var(--bad)}
+  .extra{color:var(--muted);font-size:13.5px;margin-top:5px}
+  .answer{margin-top:6px;font-size:15px;color:var(--muted)}
+  .answer b{color:var(--ink);font-weight:650}
+
+  /* ---- section (구역) ---- */
+  .sechead{margin:26px 0 4px;font-size:13.5px;font-weight:700;color:var(--muted);
+           letter-spacing:.4px;padding-bottom:6px;border-bottom:1px solid var(--line);
+           display:flex;align-items:baseline;gap:8px}
+  .sechead .n{color:var(--ink)}
+  .sechead .secdel{margin-left:auto;border:none;background:none;color:var(--muted);
+                   font:inherit;font-size:13px;cursor:pointer;padding:0 4px;line-height:1}
+  .sechead .secdel:hover{color:var(--bad)}
+  .selbar{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);z-index:20;
+          display:flex;gap:9px;align-items:center;padding:10px 14px;
+          background:var(--card);border:1px solid var(--line);border-radius:14px;
+          box-shadow:0 6px 30px rgba(0,0,0,.14)}
+  .selbar .cnt{font-size:13px;color:var(--muted);white-space:nowrap;font-variant-numeric:tabular-nums}
+  .selbar input{width:150px}
+
+  /* ---- saved list / save ---- */
+  .srow{display:flex;gap:10px;align-items:center;margin:8px 0;padding:10px 14px;
+        background:var(--card);border:1px solid var(--line);border-radius:10px}
+  /* password lock screen */
+  .lock{position:fixed;inset:0;z-index:100;background:var(--bg);
+        display:flex;align-items:center;justify-content:center}
+  .lockbox{display:flex;flex-direction:column;gap:12px;align-items:center;
+           background:var(--card);border:1px solid var(--line);border-radius:14px;
+           box-shadow:var(--shadow);padding:34px 38px;min-width:280px}
+  .lockbox h2{margin:0;font-size:17px;font-weight:700}
+  .lockbox input{width:100%;text-align:center;font-size:16px;padding:8px 12px;
+                 border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink)}
+  .lockbox input:focus{outline:none;border-color:var(--ink)}
+  .lockmsg{font-size:12.5px;color:var(--bad);min-height:16px}
+  .lockbox .btn.dark{width:100%;padding:7px 0;font-size:14.5px}
+  .lockreset{border:none;background:none;color:var(--muted);font:inherit;font-size:12.5px;
+             cursor:pointer;text-decoration:underline;text-underline-offset:3px}
+  .lockreset:hover{color:var(--ink)}
+
+  .hidden{display:none}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Dictation Maker</h1>
+      <p>오디오 파일을 넣으면 문장별로 나눠 받아쓰기 연습을 만듭니다.</p>
+    </div>
+  </header>
+
+  <!-- ============ SETUP ============ -->
+  <div class="setup" id="setup">
+    <div style="display:flex;justify-content:flex-end;align-items:center;gap:14px;margin-bottom:12px">
+      <button class="tbtn" title="안내 문장 일괄 삭제">#</button>
+      <button class="obtn" title="AI 프롬프트"></button>
+      <button class="knob" title="오디오 분석 ↔ 딕테이션" disabled></button>
+    </div>
+    <div class="drop" id="drop">
+      <b>오디오 파일을 여기로 끌어놓거나 클릭</b>
+      <small>mp3 · m4a · wav · ogg 등 — 기기 안에서만 처리되며 업로드되지 않습니다</small>
+    </div>
+    <input type="file" id="file" accept="audio/*" class="hidden">
+
+    <div class="opt" id="savedWrap" style="display:none">
+      <h3>저장된 오디오 <span class="meta" style="font-weight:400">— 파일 다시 고를 필요 없이 바로 열기</span></h3>
+      <div id="savedList"></div>
+    </div>
+
+    <div class="go">
+      <button class="btn" id="start" disabled>분석 시작</button>
+    </div>
+    <div class="status" id="status"></div>
+    <div class="pbar" id="pbar"><i></i></div>
+    <div style="text-align:right;margin-top:34px">
+      <button class="lockreset" id="pwChange">비밀번호 변경</button>
+    </div>
+  </div>
+
+  <!-- ============ PRACTICE ============ -->
+  <div id="practice" class="hidden">
+    <div class="bar">
+      <label>구역 <select id="filter"></select></label>
+      <label>속도 <select id="speed"></select></label>
+      <label>반복 <select id="repeat"></select></label>
+      <label>간격 <select id="gap"></select></label>
+      <div class="ratebox">
+        <button class="btn" id="resetAll">정답률 초기화</button>
+        <span class="rate" id="rate">정답률 —</span>
+      </div>
+      <button class="tbtn" style="margin-left:auto" title="안내 문장 일괄 삭제">#</button>
+      <button class="obtn" title="AI 프롬프트"></button>
+      <button class="knob on" title="오디오 분석 ↔ 딕테이션"></button>
+      <div class="track"><i id="trackFill"></i></div>
+      <div style="flex-basis:100%;display:flex;align-items:center;gap:12px">
+        <span class="hint" style="margin-top:0">왼쪽 체크박스로 문장 범위를 고르면 이름을 붙여 구역으로 저장할 수 있습니다 · 다음 문장 <kbd>Ctrl/⌘+Enter</kbd> · 다시 듣기 <kbd>Alt+Enter</kbd></span>
+        <span class="progress">완료 <b id="doneCount">0</b> / <b id="totalCount">0</b></span>
+      </div>
+    </div>
+    <div id="list"></div>
+    <div class="selbar hidden" id="selbar">
+      <span class="cnt" id="selCount"></span>
+      <input type="text" id="selName" placeholder="구역 이름" maxlength="30">
+      <button class="btn dark" id="selSave">구역 저장</button>
+      <button class="btn" id="selClear">취소</button>
+    </div>
+  </div>
+</div>
+
+<div class="lock" id="lock">
+  <div class="lockbox">
+    <h2>Dictation Maker</h2>
+    <input type="password" id="pwInput" placeholder="비밀번호" autocomplete="off">
+    <div class="lockmsg" id="pwMsg"></div>
+    <button class="btn dark" id="pwEnter">들어가기</button>
+    <button class="lockreset" id="pwReset">비밀번호 초기화</button>
+  </div>
+</div>
+
+<div class="pmodal hidden" id="pmodal">
+  <div class="pbox">
+    <div class="phead">
+      <b>AI 프롬프트</b>
+      <button class="ic" id="pcopy" title="복사 (전체 문장이 함께 복사됩니다)">⧉</button>
+      <button class="ic" id="pclose" title="닫기">✕</button>
+    </div>
+    <textarea id="ptext" spellcheck="false"></textarea>
+    <div class="hint">복사 버튼을 누르면 이 프롬프트 뒤에 전체 문장(#번호 포함)이 자동으로 붙어 복사됩니다. 수정한 프롬프트는 저장됩니다.</div>
+  </div>
+</div>
+
+<div class="pmodal hidden" id="xmodal">
+  <div class="pbox">
+    <div class="phead">
+      <b>안내 문장 일괄 삭제</b>
+      <button class="ic" id="xcopy" title="복사 (전체 문장이 함께 복사됩니다)">⧉</button>
+      <button class="ic" id="xapply" title="일치하는 문장 삭제" style="width:auto;padding:0 10px">삭제</button>
+      <button class="ic" id="xclose" title="닫기">✕</button>
+    </div>
+    <textarea id="xtext" spellcheck="false"></textarea>
+    <div class="hint">⧉로 위 내용을 복사해 제미나이(Gemini)에 붙여넣으세요. 제미나이가 알려준 문장 목록을 이 칸에 붙여넣고 <b>삭제</b>를 누르면 해당 문장들이 목록에서 지워집니다.</div>
+  </div>
+</div>
+
+<script>
+/* ================= scoring (from dictation.html) ================= */
+function escapeHtml(s){return s.replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+function normTokens(s){return s.toLowerCase().replace(/[’']/g,'').replace(/[^a-z0-9]+/g,' ').trim().split(/\s+/).filter(Boolean);}
+function editDist(a,b,cap){const n=a.length,m=b.length;if(Math.abs(n-m)>cap)return cap+1;let prev=new Array(m+1);for(let j=0;j<=m;j++)prev[j]=j;for(let i=1;i<=n;i++){const cur=new Array(m+1);cur[0]=i;let best=i;const ai=a.charCodeAt(i-1);for(let j=1;j<=m;j++){const cost=ai===b.charCodeAt(j-1)?0:1;cur[j]=Math.min(prev[j]+1,cur[j-1]+1,prev[j-1]+cost);if(cur[j]<best)best=cur[j];}if(best>cap)return cap+1;prev=cur;}return prev[m];}
+/* Words pair up when within 3 typos — but never let short unrelated words
+   (cat/dog, the/and) pair: allowed typos also scale with word length. */
+function fuzzyCap(a,b){return Math.min(3,Math.max(1,Math.floor(Math.max(a.length,b.length)/2)));}
+function eqFuzzy(a,b){const c=fuzzyCap(a,b);return editDist(a,b,c)<=c;}
+function lcsMatch(a,b,eq){const n=a.length,m=b.length;const dp=Array.from({length:n+1},()=>new Int32Array(m+1));for(let i=n-1;i>=0;i--)for(let j=m-1;j>=0;j--)dp[i][j]=eq(a[i],b[j])?dp[i+1][j+1]+1:Math.max(dp[i+1][j],dp[i][j+1]);const pair=new Array(n).fill(-1);let i=0,j=0;while(i<n&&j<m){if(eq(a[i],b[j])){pair[i]=j;i++;j++;}else if(dp[i+1][j]>=dp[i][j+1])i++;else j++;}return pair;}
+function score(answer,user){const ansDisp=answer.split(/\s+/).filter(Boolean);const ansNorm=ansDisp.map(w=>normTokens(w).join(''));const usr=normTokens(user);const pair=lcsMatch(ansNorm,usr,eqFuzzy);const usedUser=new Set();let correct=0,total=0;const diff=ansDisp.map((w,i)=>{const nrm=ansNorm[i];if(nrm===''){return escapeHtml(w);}total++;const j=pair[i];if(j<0){return '<w class="m">'+escapeHtml(w)+'</w>';}usedUser.add(j);correct++;const d=editDist(nrm,usr[j],4);const cls=(d===0)?'g':(d<=3?'y':'m');return '<w class="'+cls+'">'+escapeHtml(w)+'</w>';}).join(' ');const pct=total?Math.round(100*correct/total):0;const extra=usr.filter((_,j)=>!usedUser.has(j));return {pct,correct,total,diff,extra};}
+
+/* ================= state ================= */
+let segments=[];           // [{start,end,text}]
+let sections=[];           // [{name,from,to}] named sentence ranges (구역)
+let audioId='';            // key of the ACTIVE practice session
+let sessName='';           // display name of the active session
+let pickedId=null;         // key of the file currently picked on the setup screen
+let best={}, answers={};
+let SKEY='', AKEY='', MKEY='';
+
+/* ================= file handling ================= */
+const fileInput=document.getElementById('file');
+const drop=document.getElementById('drop');
+const startBtn=document.getElementById('start');
+const statusEl=document.getElementById('status');
+const pbar=document.getElementById('pbar');
+let chosenFile=null, pendingOpenId=null;
+
+drop.onclick=()=>fileInput.click();
+drop.ondragover=e=>{e.preventDefault();drop.classList.add('hot');};
+drop.ondragleave=()=>drop.classList.remove('hot');
+drop.ondrop=e=>{e.preventDefault();drop.classList.remove('hot');if(e.dataTransfer.files[0])pickFile(e.dataTransfer.files[0]);};
+fileInput.onchange=()=>{if(fileInput.files[0])pickFile(fileInput.files[0]);};
+
+const idOf=f=>(f.name+'_'+f.size).replace(/[^a-zA-Z0-9]+/g,'_');
+async function pickFile(f){
+  const id=idOf(f);
+  let note='';
+  if(pendingOpenId){                               // user is re-selecting a saved audio's original file
+    if(id===pendingOpenId){const want=pendingOpenId;pendingOpenId=null;await openWithFile(f,want);return;}
+    pendingOpenId=null;                            // different file → treat it as a fresh pick, don't trap the user
+    note='목록의 그 오디오와 다른 파일이라, 새 오디오로 불러왔습니다. ';
+  }
+  chosenFile=f;pickedId=id;                        // NOTE: does not touch the active session's keys
+  drop.innerHTML='<b>'+escapeHtml(f.name)+'</b><small>'+(f.size/1048576).toFixed(1)+' MB · 준비됨</small>';
+  startBtn.disabled=false;
+  const pm=JSON.parse(localStorage.getItem('audiodict_meta_'+id)||'null');
+  setStatus(note+(pm?'이 파일은 저장된 분석 결과가 있어, 목록에서 열면 재분석 없이 바로 시작됩니다.':''));
+  loadWhisper(false).catch(()=>{});   // preload model in background while user clicks start
+}
+/* make (id,…) the ACTIVE practice session and enter it */
+function startSession(id,name,segs,secs,file){
+  audioId=id;sessName=name||'';MKEY='audiodict_meta_'+id;
+  segments=segs;sections=secs||[];
+  setPlayerSource(file);                 // pitch-preserving playback uses the original file
+  enterPractice();
+}
+async function openWithFile(f,id){                 // open a saved session using a freshly-picked file
+  const meta=JSON.parse(localStorage.getItem('audiodict_meta_'+id)||'null');
+  if(!meta){setStatus('분석 정보가 없습니다. 다시 분석해 주세요.',true);return;}
+  try{
+    setStatus('오디오 여는 중…');
+    const buffer=await decodeFile(f);
+    snapBoundaries(meta.segments,buffer);          // re-tighten cuts to real pauses (buffer discarded after)
+    await saveAudio(id,f);                         // re-try storing the audio (works if IndexedDB is allowed)
+    startSession(id,meta.name||f.name,meta.segments,meta.sections,f);
+  }catch(e){setStatus('열기 실패: '+(e.message||e),true);}
+}
+function setStatus(msg,isErr){statusEl.textContent=msg;statusEl.classList.toggle('err',!!isErr);}
+function setProgress(frac){if(frac==null){pbar.classList.remove('show');return;}pbar.classList.add('show');pbar.firstElementChild.style.width=Math.round(frac*100)+'%';}
+
+/* ================= audio decode + resample ================= */
+let ctx=null;
+function ensureCtx(){if(!ctx)ctx=new (window.AudioContext||window.webkitAudioContext)();if(ctx.state==='suspended')ctx.resume();return ctx;}
+
+async function decodeFile(f){
+  const buf=await f.arrayBuffer();
+  return await ensureCtx().decodeAudioData(buf.slice(0));
+}
+async function toMono16k(buffer){
+  const len=Math.max(1,Math.ceil(buffer.duration*16000));
+  const off=new OfflineAudioContext(1,len,16000);
+  const src=off.createBufferSource();src.buffer=buffer;src.connect(off.destination);src.start(0);
+  const r=await off.startRendering();
+  return r.getChannelData(0);
+}
+
+/* Split text into sentence spans, keeping each sentence's char offsets so we can
+   look up its time. Splits on . ? ! … even when they sit INSIDE a chunk. */
+function sentenceSpans(text){
+  const spans=[]; const re=/[^.?!。！？…]*[.?!。！？…]+["'”’)\]]*/g; let m, last=0;
+  while((m=re.exec(text))){
+    if(!m[0].trim())continue;
+    spans.push({a:m.index,b:m.index+m[0].length});
+    last=re.lastIndex;
+  }
+  if(last<text.length && text.slice(last).trim()) spans.push({a:last,b:text.length});
+  return spans;
+}
+/* Turn Whisper timestamp-chunks into ONE segment per sentence.
+   Build the full transcript, map char position -> time by interpolating within
+   each chunk, then cut on sentence punctuation. Precise cuts come from snapping. */
+function chunksToSentenceSegments(chunks,dur){
+  // 1) group chunks separated by a long silence (>1.2s) — a gap is a hard boundary
+  //    even without punctuation, so announcements/pauses don't glob together.
+  const GAP=1.2, groups=[]; let g=[];
+  for(const c of chunks){
+    const txt=(c.text||'').trim(); if(!txt)continue;
+    const t0=(c.timestamp&&c.timestamp[0]!=null)?c.timestamp[0]:null;
+    if(g.length){ const prev=g[g.length-1]; const pe=prev.timestamp?prev.timestamp[1]:null;
+      if(t0!=null&&pe!=null&&t0-pe>GAP){ groups.push(g); g=[]; } }
+    g.push(c);
+  }
+  if(g.length)groups.push(g);
+  // 2) within each group, concat text, map char->time, split on sentence punctuation
+  const segs=[];
+  for(const grp of groups){
+    let full=''; const map=[];
+    for(const c of grp){
+      const txt=(c.text||'').trim(); if(!txt)continue;
+      const t0=(c.timestamp&&c.timestamp[0]!=null)?c.timestamp[0]:(map.length?map[map.length-1].t1:0);
+      const t1=(c.timestamp&&c.timestamp[1]!=null)?c.timestamp[1]:dur;
+      if(full)full+=' ';
+      const a=full.length; full+=txt; map.push({a,b:full.length,t0,t1});
+    }
+    if(!map.length)continue;
+    const timeAt=pos=>{
+      if(pos<=map[0].a)return map[0].t0;
+      for(const mm of map){ if(pos<=mm.b){const f=mm.b>mm.a?(pos-mm.a)/(mm.b-mm.a):0;return mm.t0+f*(mm.t1-mm.t0);} }
+      return map[map.length-1].t1;
+    };
+    for(const sp of sentenceSpans(full)){
+      let a=sp.a; while(a<sp.b && /\s/.test(full[a]))a++;
+      const text=full.slice(a,sp.b).trim(); if(!text)continue;
+      segs.push({start:timeAt(a),end:timeAt(sp.b),text});
+    }
+  }
+  return segs;
+}
+
+/* Whisper timestamps drift ~0.5s late, so cuts bleed into the next word and
+   clip the following sentence's first word. Snap every boundary to the actual
+   pause: the quietest point in a small window around the reported boundary. */
+function buildEnvelope(buffer){
+  const data=buffer.getChannelData(0), sr=buffer.sampleRate;
+  const hop=Math.max(1,Math.floor(sr*0.01));      // 10ms resolution
+  const win=Math.max(hop,Math.floor(sr*0.025));   // 25ms RMS window
+  const n=Math.max(0,Math.floor((data.length-win)/hop)+1);
+  const rms=new Float32Array(n);
+  for(let f=0;f<n;f++){let s=0;const o=f*hop;for(let j=0;j<win;j++){const v=data[o+j];s+=v*v;}rms[f]=Math.sqrt(s/win);}
+  return {buffer,sr,hop,rms};
+}
+function quietestTime(env,center,half){
+  const {hop,sr,rms}=env;
+  const lo=Math.max(0,Math.floor((center-half)*sr/hop));
+  const hi=Math.min(rms.length-1,Math.floor((center+half)*sr/hop));
+  if(hi<=lo)return center;
+  let bv=Infinity;
+  for(let f=lo;f<=hi;f++)if(rms[f]<bv)bv=rms[f];
+  // Cut at the CENTER of the longest near-silent run, not its first frame,
+  // so the cut never hugs the onset of the next word.
+  const tol=Math.max(bv*1.6,1e-6);
+  let bestA=-1,bestB=-1,a=-1;
+  for(let f=lo;f<=hi+1;f++){
+    const quiet=f<=hi&&rms[f]<=tol;
+    if(quiet&&a<0)a=f;
+    else if(!quiet&&a>=0){ if(f-a>bestB-bestA){bestA=a;bestB=f;} a=-1; }
+  }
+  if(bestA<0)return center;
+  return ((bestA+bestB-1)/2)*hop/sr;
+}
+/* Walk a lone edge (bordering a long silence) to the nearest quiet frame so it
+   never lands on speech: dir=-1 moves a start earlier, dir=+1 moves an end later. */
+function walkToQuiet(env,t,dir,maxWalk){
+  const {hop,sr,rms}=env;
+  const i0=Math.min(rms.length-1,Math.max(0,Math.round(t*sr/hop)));
+  const span=Math.round(maxWalk*sr/hop);
+  let bv=Infinity;
+  for(let k=0;k<=span;k++){const f=i0+dir*k;if(f<0||f>=rms.length)break;if(rms[f]<bv)bv=rms[f];}
+  const tol=Math.max(bv*1.6,1e-6);
+  for(let k=0;k<=span;k++){
+    const f=i0+dir*k; if(f<0||f>=rms.length)break;
+    if(rms[f]<=tol)return f*hop/sr;
+  }
+  return t;
+}
+function snapBoundaries(segs,buffer){
+  if(!segs.length)return segs;
+  const env=buildEnvelope(buffer), dur=buffer.duration;
+  for(let i=0;i<segs.length-1;i++){
+    const gap=segs[i+1].start-segs[i].end;
+    if(gap<=1.2){                                   // adjacent: share one clean cut in the pause
+      const t=quietestTime(env,(segs[i].end+segs[i+1].start)/2,0.4);
+      segs[i].end=t; segs[i+1].start=t;
+    }else{                                          // long silence between: keep each tight, don't absorb it
+      segs[i].end=Math.min(dur,walkToQuiet(env,segs[i].end,1,0.8)+0.1);
+      segs[i+1].start=Math.max(0,walkToQuiet(env,segs[i+1].start,-1,0.8)-0.05);
+    }
+  }
+  // Outer edges: walk outward to silence so the first/last word is never clipped.
+  segs[0].start=Math.max(0,walkToQuiet(env,segs[0].start,-1,0.8)-0.05);
+  const L=segs.length-1;
+  segs[L].end=Math.min(dur,walkToQuiet(env,segs[L].end,1,0.8)+0.1);
+  for(let i=0;i<segs.length;i++){                   // keep order + minimal length
+    if(segs[i].end<segs[i].start+0.1)segs[i].end=Math.min(dur,segs[i].start+0.1);
+  }
+  return segs;
+}
+
+/* ================= local storage of audio (IndexedDB) ================= */
+let idbOK=true;
+function idbOpen(){return new Promise((res,rej)=>{let r;try{r=indexedDB.open('dictmaker',1);}catch(e){return rej(e);}r.onupgradeneeded=()=>{const db=r.result;if(!db.objectStoreNames.contains('audios'))db.createObjectStore('audios');};r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error);});}
+function idbReq(mode,fn){return idbOpen().then(db=>new Promise((res,rej)=>{const tx=db.transaction('audios',mode);const st=tx.objectStore('audios');const rq=fn(st);tx.oncomplete=()=>res(rq&&rq.result);tx.onerror=()=>rej(tx.error);}));}
+async function idbPut(key,val){try{await idbReq('readwrite',st=>st.put(val,key));}catch(e){idbOK=false;console.warn('IndexedDB 저장 실패',e);}}
+async function idbGet(key){try{return await idbReq('readonly',st=>st.get(key));}catch(e){idbOK=false;return null;}}
+async function idbDel(key){try{await idbReq('readwrite',st=>st.delete(key));}catch(e){}}
+async function idbKeys(){try{return await idbReq('readonly',st=>st.getAllKeys())||[];}catch(e){idbOK=false;return [];}}
+
+async function saveAudio(id,file){ if(file)await idbPut(id,{blob:file,name:file.name,at:Date.now()}); }
+
+function savedIds(){const out=[];for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i);if(k&&k.indexOf('audiodict_meta_')===0)out.push(k.slice(15));}return out;}
+async function renderSaved(){
+  const wrap=document.getElementById('savedWrap'),list=document.getElementById('savedList');
+  const ids=savedIds();
+  if(!ids.length){wrap.style.display='none';return;}
+  let stored=new Set();try{stored=new Set(await idbKeys());}catch(e){}   // which sessions still have their audio
+  const items=ids.map(id=>{const m=JSON.parse(localStorage.getItem('audiodict_meta_'+id)||'null');
+    return{id,name:(m&&m.name)||id,at:(m&&m.at)||0,n:(m&&m.segments&&m.segments.length)||0,has:stored.has(id)};});
+  items.sort((a,b)=>b.at-a.at);
+  list.innerHTML=items.map(it=>`<div class="srow">
+      <button class="btn open" data-id="${it.id}">열기</button>
+      <span class="meta">${escapeHtml(it.name)} · ${it.n}문장${it.has?'':' · <span style="color:var(--warn)">원본 재선택 필요</span>'}</span>
+      <button class="btn del delsaved" data-id="${it.id}" title="저장 삭제">✕</button>
+    </div>`).join('');
+  wrap.style.display='';
+  list.querySelectorAll('.open').forEach(b=>b.onclick=()=>openSaved(b.dataset.id));
+  list.querySelectorAll('.delsaved').forEach(b=>b.onclick=()=>delSaved(b.dataset.id));
+}
+async function openSaved(id){
+  const meta=JSON.parse(localStorage.getItem('audiodict_meta_'+id)||'null');
+  if(!meta){setStatus('분석 정보가 없습니다. 다시 분석해 주세요.',true);return;}
+  const rec=await idbGet(id);
+  if(rec&&rec.blob){                               // audio was stored → open instantly
+    try{
+      setStatus('저장된 오디오 여는 중…');
+      startSession(id,meta.name,meta.segments,meta.sections,rec.blob);
+    }catch(e){setStatus('열기 실패: '+(e.message||e),true);}
+  }else{                                           // audio not kept (file:// blocked IndexedDB) → re-pick once
+    pendingOpenId=id;
+    setStatus('"'+(meta.name||id)+'" 의 오디오 원본이 저장돼 있지 않습니다. 같은 파일을 한 번만 다시 선택하면 문장·점수 그대로 열립니다.');
+    fileInput.value='';fileInput.click();
+  }
+}
+async function delSaved(id){
+  if(!confirm('이 저장된 오디오와 기록을 삭제할까요?'))return;
+  await idbDel(id);
+  localStorage.removeItem('audiodict_meta_'+id);
+  localStorage.removeItem('audiodict_score_'+id);
+  localStorage.removeItem('audiodict_ans_'+id);
+  renderSaved();
+}
+
+/* ================= whisper (transformers.js v3, WebGPU when available) =========
+   Speed comes from the backend: file:// WASM is single-threaded and slow, so we
+   run on WebGPU when the browser exposes it (typically 5-10x faster) and fall
+   back to WASM otherwise. Model is fixed to small.en for accuracy. */
+const WHISPER_MODEL='onnx-community/whisper-small.en';
+let transcriber=null, backend='', whisperLoading=null;
+function loadWhisper(onProg){
+  if(transcriber)return Promise.resolve(transcriber);
+  if(whisperLoading)return whisperLoading;      // single shared load (preload + analyze)
+  whisperLoading=(async()=>{
+    const t=await import('https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.5.0');
+    t.env.allowLocalModels=false;
+    const prog=p=>{if(onProg&&p.status==='progress'&&p.total)onProg(0.02+0.28*p.loaded/p.total);};
+    const build=opts=>t.pipeline('automatic-speech-recognition',WHISPER_MODEL,opts);
+    if(navigator.gpu){
+      try{
+        transcriber=await build({device:'webgpu',
+          dtype:{encoder_model:'fp16',decoder_model_merged:'q4'},progress_callback:prog});
+        backend='webgpu';
+      }catch(e){ transcriber=null; }   // fall through to WASM
+    }
+    if(!transcriber){
+      transcriber=await build({device:'wasm',dtype:'q8',progress_callback:prog});
+      backend='wasm';
+    }
+    return transcriber;
+  })();
+  whisperLoading.catch(()=>{whisperLoading=null;});   // allow retry after failure
+  return whisperLoading;
+}
+
+/* Sequentially transcribe long audio in 30s windows (2s overlap) so memory
+   stays bounded (only one window in flight) and long files don't crash. */
+/* RMS envelope over 16k PCM, for finding speech vs silence. */
+function pcmEnv(pcm,sr){
+  const hop=Math.max(1,Math.floor(sr*0.02)), win=Math.max(1,Math.floor(sr*0.03));
+  const n=Math.max(0,Math.floor((pcm.length-win)/hop)+1);
+  const rms=new Float32Array(n);
+  for(let f=0;f<n;f++){let s=0;const o=f*hop;for(let j=0;j<win;j++){const v=pcm[o+j];s+=v*v;}rms[f]=Math.sqrt(s/win);}
+  return {hop,sr,rms};
+}
+/* Contiguous regions that contain speech, so we skip long silences (which make
+   Whisper hallucinate) and never start/stop a window in the middle of a word. */
+function speechRegions(env,dur){
+  const {hop,sr,rms}=env;
+  const n=rms.length;
+  if(!n)return [{s:0,e:dur}];
+  const sorted=Float32Array.from(rms).sort();
+  const q=x=>sorted[Math.min(n-1,Math.max(0,Math.floor(x*n)))];
+  // Fail-safe threshold: only TRUE silence (~-40dB below peak) counts as a gap,
+  // so continuous audio (lectures, podcasts) never loses quiet speech.
+  const thr=Math.max(q(0.98)*0.01, 1e-4);
+  const dt=hop/sr;
+  const sp=new Uint8Array(n);
+  for(let f=0;f<n;f++)sp[f]=rms[f]>thr?1:0;
+  // Bridge short pauses (<=1.2s) so a conversation stays in one window; only
+  // long silences (answer gaps) split regions and get skipped entirely.
+  const joinF=Math.round(1.2/dt);
+  for(let f=0;f<n;){
+    if(sp[f]){f++;continue;}
+    let g=f;while(g<n&&!sp[g])g++;
+    if(g-f<=joinF && f>0 && g<n)for(let k=f;k<g;k++)sp[k]=1;
+    f=g;
+  }
+  const R=[], pad=0.12, minSpeech=0.30;
+  for(let f=0;f<n;){
+    if(!sp[f]){f++;continue;}
+    let g=f;while(g<n&&sp[g])g++;
+    const s=Math.max(0,f*dt-pad), e=Math.min(dur,(g-1)*dt+pad);
+    if(e-s>=minSpeech)R.push({s,e});
+    f=g;
+  }
+  return R.length?R:[{s:0,e:dur}];
+}
+/* Break a region longer than Whisper's 30s context at its quietest interior point. */
+function windowsForRegion(env,r,maxW){
+  if(r.e-r.s<=maxW)return [[r.s,r.e]];
+  const {hop,sr,rms}=env, out=[]; let start=r.s;
+  while(r.e-start>maxW){
+    const lo=start+maxW*0.6, hi=start+maxW;
+    const flo=Math.floor(lo*sr/hop), fhi=Math.min(rms.length-1,Math.floor(hi*sr/hop));
+    let bi=flo,bv=Infinity; for(let f=flo;f<=fhi;f++){if(rms[f]<bv){bv=rms[f];bi=f;}}
+    let cut=bi*hop/sr; if(cut<=start+1)cut=hi;
+    out.push([start,cut]); start=cut;
+  }
+  out.push([start,r.e]);
+  return out;
+}
+async function transcribeLong(pcm,onProgress){
+  const SR=16000, dur=pcm.length/SR, all=[];
+  const env=pcmEnv(pcm,SR);
+  const wins=[];
+  for(const r of speechRegions(env,dur)) for(const w of windowsForRegion(env,r,29)) wins.push(w);
+  if(!wins.length)wins.push([0,dur]);
+  for(let i=0;i<wins.length;i++){
+    const [t0,t1]=wins[i];
+    const a=Math.floor(t0*SR), b=Math.min(pcm.length,Math.ceil(t1*SR));
+    if(b-a<SR*0.1)continue;                          // skip ultra-short slivers
+    const out=await transcriber(pcm.subarray(a,b),{return_timestamps:true});
+    const chs=(out.chunks&&out.chunks.length)?out.chunks:[{timestamp:[0,t1-t0],text:out.text||''}];
+    for(const c of chs){
+      const txt=(c.text||'').trim(); if(!txt)continue;
+      const cs=((c.timestamp&&c.timestamp[0]!=null)?c.timestamp[0]:0)+t0;
+      const ce=((c.timestamp&&c.timestamp[1]!=null)?c.timestamp[1]:(t1-t0))+t0;
+      // drop Whisper's repetition-loop hallucination: identical text back-to-back
+      const prev=all[all.length-1];
+      if(prev && prev.text.toLowerCase()===txt.toLowerCase() && cs-prev.timestamp[1]<0.6)continue;
+      all.push({timestamp:[cs,Math.min(ce,t1)],text:txt});
+    }
+    if(onProgress)onProgress((i+1)/wins.length);
+    await new Promise(r=>setTimeout(r,0));            // yield so the UI stays responsive
+  }
+  return all;
+}
+
+/* ================= analyze pipeline ================= */
+startBtn.onclick=analyze;
+
+async function analyze(){
+  if(!chosenFile)return;
+  const f=chosenFile, id=pickedId;      // captured: the active practice session stays untouched
+  startBtn.disabled=true;
+  try{
+    /* Progress: 0-2% decode · 2-30% model load (first time) · 30-100% recognition */
+    setStatus('오디오 읽는 중…');setProgress(0.01);
+    let buffer;
+    try{ buffer=await decodeFile(f); }
+    catch(e){ throw new Error('이 오디오 파일을 디코딩할 수 없습니다 ('+(e.message||e.name)+'). 다른 형식(mp3/wav)으로 시도해 보세요.'); }
+
+    const durTxt=buffer.duration>=90
+      ? '약 '+Math.round(buffer.duration/60)+'분'
+      : Math.round(buffer.duration)+'초';
+    const tick=fr=>{const p=Math.round(fr*100);
+      setProgress(fr);
+      setStatus(p+'% 완료 · 남음 '+(100-p)+'% · 오디오 '+durTxt);};
+    tick(0.02);
+    await loadWhisper(tick);
+    tick(0.30);
+    const pcm=await toMono16k(buffer);
+    let chunks=await transcribeLong(pcm,fr=>tick(0.30+0.70*fr));
+    setProgress(null);setStatus('');
+    chunks=chunks.filter(c=>c.text&&c.text.trim());
+    if(!chunks.length)throw new Error('인식된 문장이 없습니다. 오디오에 음성이 있는지 확인해 주세요.');
+    const segs=chunksToSentenceSegments(chunks,buffer.duration).filter(s=>s.text.trim());
+    snapBoundaries(segs,buffer);          // cut precisely at real pauses
+    if(!segs.length)throw new Error('문장을 만들지 못했습니다.');
+    localStorage.setItem('audiodict_meta_'+id,JSON.stringify({segments:segs,sections:[],name:f.name,at:Date.now()}));
+    await saveAudio(id,f);                // auto-save audio locally (IndexedDB)
+    renderSaved();
+    const dictating=!document.getElementById('practice').classList.contains('hidden');
+    if(dictating){                        // user is mid-dictation on another audio — don't yank them out
+      setStatus('분석 완료 — "저장된 오디오" 목록에서 열 수 있습니다.');
+    }else{
+      startSession(id,f.name,segs,[],f);
+    }
+  }catch(e){
+    setStatus('실패: '+(e.message||e),true);setProgress(null);startBtn.disabled=false;
+  }
+}
+
+/* ================= practice ================= */
+function enterPractice(){
+  SKEY='audiodict_score_'+audioId;AKEY='audiodict_ans_'+audioId;
+  best=JSON.parse(localStorage.getItem(SKEY)||'{}');
+  answers=JSON.parse(localStorage.getItem(AKEY)||'{}');
+  curFilter='all';selSet.clear();                  // never inherit another audio's section filter
+  showAllAnswers=false;
+  setView('practice');
+  initBar();updateSelbar();render();updateProgress();updateRate();
+  setStatus('');setProgress(null);
+}
+/* ---- view switch: 오디오 분석 ↔ 딕테이션, freely back and forth ---- */
+function setView(v){
+  const setup=v==='setup';
+  document.getElementById('setup').classList.toggle('hidden',!setup);
+  document.getElementById('practice').classList.toggle('hidden',setup);
+  document.querySelectorAll('.knob').forEach(k=>{
+    k.classList.toggle('on',!setup);
+    k.disabled=!segments.length;
+  });
+  if(setup){
+    stopPlayback();
+    selSet.clear();document.getElementById('selbar').classList.add('hidden');
+    startBtn.disabled=!chosenFile;
+    renderSaved();
+  }
+}
+document.querySelectorAll('.knob').forEach(k=>k.onclick=()=>{
+  const inPractice=!document.getElementById('practice').classList.contains('hidden');
+  if(inPractice)setView('setup');
+  else if(segments.length)setView('practice');
+});
+
+function answerText(i){return answers[i]!=null?answers[i]:segments[i].text;}
+function setAnswer(i,text){const v=(text||'').trim();if(v)answers[i]=v;else delete answers[i];localStorage.setItem(AKEY,JSON.stringify(answers));}
+function saveBest(i,pct){best[i]=Math.max(best[i]||0,pct);localStorage.setItem(SKEY,JSON.stringify(best));updateProgress();updateRate();}
+
+/* shift index-keyed maps down when a segment is removed */
+function reindex(obj,removed){const out={};Object.keys(obj).forEach(k=>{const n=+k;if(n<removed)out[n]=obj[k];else if(n>removed)out[n-1]=obj[k];});return out;}
+function persistAll(){
+  localStorage.setItem(MKEY,JSON.stringify({segments,sections,name:sessName,at:Date.now()}));
+  localStorage.setItem(SKEY,JSON.stringify(best));
+  localStorage.setItem(AKEY,JSON.stringify(answers));
+}
+function deleteSegment(i){
+  stopPlayback();
+  segments.splice(i,1);
+  best=reindex(best,i);answers=reindex(answers,i);
+  reindexSections(i);
+  selSet.clear();updateSelbar();
+  persistAll();
+  render();updateProgress();updateRate();
+}
+
+/* ---- sections (구역): named sentence ranges picked via checkboxes ---- */
+let curFilter='all';                     // 'all' or section index as string
+let selSet=new Set();                    // currently checked sentence indices
+let showAllAnswers=false;                // 정답 전체 보기 toggle
+function toggleRevealAll(){showAllAnswers=!showAllAnswers;render();}
+function curSection(){return curFilter==='all'?null:sections[+curFilter]||null;}
+function viewIdx(){
+  const s=curSection();
+  if(!s)return segments.map((_,i)=>i);
+  const out=[];for(let i=s.from;i<=s.to&&i<segments.length;i++)out.push(i);return out;
+}
+function filterLabel(){const s=curSection();return s?s.name:'전체';}
+function refreshFilterOptions(){
+  const sel=document.getElementById('filter');
+  if(curFilter!=='all'&&!sections[+curFilter])curFilter='all';
+  let html='<option value="all">전체</option>';
+  sections.forEach((s,k)=>{html+=`<option value="${k}">${escapeHtml(s.name)}</option>`;});
+  sel.innerHTML=html;sel.value=curFilter;
+}
+function deleteSection(k){
+  const s=sections[k];if(!s)return;
+  if(!confirm('구역 "'+s.name+'"을(를) 삭제할까요? (문장은 그대로 남습니다)'))return;
+  sections.splice(k,1);
+  if(curFilter!=='all'){const c=+curFilter;if(c===k)curFilter='all';else if(c>k)curFilter=String(c-1);}
+  persistAll();render();updateProgress();updateRate();
+}
+/* keep section ranges valid when a sentence is removed */
+function reindexSections(removed){
+  sections=sections.filter(s=>{
+    if(removed<s.from){s.from--;s.to--;}
+    else if(removed<=s.to){s.to--;}
+    return s.to>=s.from&&s.from>=0;
+  });
+}
+/* ---- selection bar ---- */
+function updateSelbar(){
+  const bar=document.getElementById('selbar');
+  if(!selSet.size){bar.classList.add('hidden');return;}
+  const a=Math.min(...selSet)+1,b=Math.max(...selSet)+1;
+  document.getElementById('selCount').textContent=
+    (a===b?('#'+a):('#'+a+'–#'+b))+' · '+(b-a+1)+'문장';
+  bar.classList.remove('hidden');
+}
+function clearSel(){selSet.clear();updateSelbar();
+  document.querySelectorAll('.selbox').forEach(c=>c.checked=false);}
+/* checking two boxes selects everything between them */
+function fillRange(){
+  if(selSet.size<2)return;
+  const a=Math.min(...selSet),b=Math.max(...selSet);
+  for(let j=a;j<=b;j++)selSet.add(j);
+  document.querySelectorAll('.selbox').forEach(c=>{if(selSet.has(+c.dataset.i))c.checked=true;});
+}
+function saveSection(){
+  if(!selSet.size)return;
+  const from=Math.min(...selSet),to=Math.max(...selSet);
+  const name=(document.getElementById('selName').value.trim())||('구역 '+(sections.length+1));
+  sections.push({name,from,to});
+  document.getElementById('selName').value='';
+  clearSel();persistAll();
+  curFilter=String(sections.length-1);               // jump straight into the new section
+  render();updateProgress();updateRate();
+}
+
+function updateProgress(){
+  const view=viewIdx();const done=view.filter(i=>best[i]!=null).length;
+  document.getElementById('doneCount').textContent=done;
+  document.getElementById('totalCount').textContent=view.length;
+  document.getElementById('trackFill').style.width=(view.length?100*done/view.length:0)+'%';
+}
+function updateRate(){
+  const box=document.getElementById('rate');
+  const view=viewIdx();
+  const done=view.filter(i=>best[i]!=null);const total=view.length;
+  if(!done.length){box.innerHTML=filterLabel()+' 정답률 <b>—</b>';return;}
+  const avg=Math.round(done.reduce((a,i)=>a+best[i],0)/done.length);
+  box.innerHTML=filterLabel()+' 정답률 <b>'+avg+'%</b> <span class="meta">('+done.length+'/'+total+')</span>';
+}
+
+/* ---- playback: HTMLAudioElement slice player ----
+   preservesPitch keeps the voice natural when speed changes (unlike
+   AudioBufferSourceNode.playbackRate, which shifts pitch with speed). */
+let playToken=0, sessURL=null;
+const player=new Audio();
+player.preservesPitch=true;
+if('mozPreservesPitch' in player)player.mozPreservesPitch=true;
+if('webkitPreservesPitch' in player)player.webkitPreservesPitch=true;
+const wait=ms=>new Promise(r=>setTimeout(r,ms));
+function setPlayerSource(file){
+  if(!file)return;
+  if(sessURL)URL.revokeObjectURL(sessURL);
+  sessURL=URL.createObjectURL(file);
+  player.src=sessURL;
+}
+function stopPlayback(){playToken++;try{player.pause();}catch(e){}}
+async function playSlice(start,end,rate,token){
+  if(player.readyState<1)                      // wait for metadata so seeking works
+    await new Promise(r=>{player.onloadedmetadata=r;player.onerror=r;});
+  if(token!==playToken)return;
+  player.currentTime=start;
+  player.playbackRate=rate;
+  // re-assert every play: some engines reset pitch preservation on rate change
+  player.preservesPitch=true;
+  if('mozPreservesPitch' in player)player.mozPreservesPitch=true;
+  if('webkitPreservesPitch' in player)player.webkitPreservesPitch=true;
+  player.play().catch(()=>{});
+  return new Promise(res=>{
+    const iv=setInterval(()=>{
+      if(token!==playToken||player.currentTime>=end-0.015||player.ended){
+        clearInterval(iv);
+        if(token===playToken)player.pause();
+        res();
+      }
+    },15);
+  });
+}
+async function play(i){
+  stopPlayback();
+  const my=++playToken;
+  const seg=segments[i];
+  const rate=parseFloat(document.getElementById('speed').value);
+  const times=parseInt(document.getElementById('repeat').value,10)||1;
+  const gap=parseFloat(document.getElementById('gap').value)||1;
+  for(let k=0;k<times;k++){
+    if(my!==playToken)return;
+    await playSlice(seg.start,seg.end,rate,my);
+    if(my!==playToken)return;
+    if(k<times-1)await wait(gap*1000);
+  }
+}
+
+/* ---- controls bar ---- */
+let barReady=false;
+function initBar(){
+  if(barReady)return;barReady=true;
+  const speed=document.getElementById('speed');let so='';
+  for(let v=5;v<=20;v++){const s=(v/10).toFixed(1);so+=`<option value="${s}"${s==='1.0'?' selected':''}>${s}x</option>`;}
+  speed.innerHTML=so;
+  document.getElementById('repeat').innerHTML=[1,2,3,4,5].map(n=>`<option value="${n}">${n}회</option>`).join('');
+  const gap=document.getElementById('gap');let go='';
+  for(let v=5;v<=100;v+=5){const s=(v/10).toFixed(1);go+=`<option value="${s}"${s==='1.0'?' selected':''}>${s}초</option>`;}
+  gap.innerHTML=go;
+  document.getElementById('filter').onchange=e=>{curFilter=e.target.value;clearSel();render();updateProgress();updateRate();};
+  document.getElementById('selSave').onclick=saveSection;
+  document.getElementById('selClear').onclick=clearSel;
+  document.getElementById('selName').addEventListener('keydown',e=>{if(e.key==='Enter')saveSection();});
+  document.getElementById('resetAll').onclick=()=>{
+    const view=viewIdx();
+    if(!confirm(filterLabel()+' 정답률을 초기화할까요?'))return;
+    view.forEach(i=>delete best[i]);localStorage.setItem(SKEY,JSON.stringify(best));
+    updateProgress();updateRate();render();
+  };
+}
+
+/* ---- render cards ---- */
+function render(){
+  refreshFilterOptions();
+  const list=document.getElementById('list');list.innerHTML='';
+  const view=new Set(viewIdx());
+  // section headers by starting index — shown in 전체 view and inside a filtered section
+  const headAt={};
+  sections.forEach((s,k)=>{
+    if(curFilter!=='all'&&+curFilter!==k)return;
+    (headAt[s.from]=headAt[s.from]||[]).push({s,k});
+  });
+  segments.forEach((seg,i)=>{
+    if(!view.has(i))return;
+    if(headAt[i])headAt[i].forEach(({s,k})=>{
+      const h=document.createElement('div');h.className='sechead';
+      h.innerHTML='<span class="n">'+escapeHtml(s.name)+'</span><span>#'+(s.from+1)+'–#'+(s.to+1)+'</span>'+
+                  '<button class="secdel" title="이 구역 삭제 (문장은 유지)">✕</button>';
+      h.querySelector('.secdel').onclick=()=>deleteSection(k);
+      list.appendChild(h);
+    });
+    const card=document.createElement('div');card.className='card'+(best[i]!=null?' done':'');
+    const edited=answers[i]!=null;
+    card.innerHTML=`
+      <div class="row">
+        <label class="selwrap" title="구역 범위 선택"><input type="checkbox" class="selbox" data-i="${i}"${selSet.has(i)?' checked':''}></label>
+        <button class="btn play">듣기</button>
+        <span class="meta">#${i+1} · ${fmt(seg.start)}–${fmt(seg.end)}${best[i]!=null?' · 최고 '+best[i]+'%':''}</span>
+        <button class="btn del" title="이 문장 삭제">✕</button>
+      </div>
+      <textarea placeholder="들은 내용을 입력…" spellcheck="false"></textarea>
+      <div class="row" style="margin-top:10px">
+        <button class="btn check">채점</button>
+        <button class="btn reveal">정답 보기</button>
+        <button class="btn editans">정답 수정${edited?' (수정됨)':''}</button>
+        <button class="btn resetscore">정답률 초기화</button>
+        <button class="btn revealall">${showAllAnswers?'정답 전체 숨기기':'정답 전체 보기'}</button>
+      </div>
+      <div class="result"></div>`;
+    const ta=card.querySelector('textarea');
+    const res=card.querySelector('.result');
+    card.querySelector('.play').onclick=()=>play(i);
+    card.querySelector('.del').onclick=()=>deleteSegment(i);
+    card.querySelector('.selbox').onchange=e=>{
+      if(e.target.checked){selSet.add(i);fillRange();}   // e.g. #1 + #10 → #1–#10 all selected
+      else selSet.delete(i);
+      updateSelbar();
+    };
+    ta.addEventListener('keydown',e=>{
+      if(e.key==='Enter'&&e.altKey){e.preventDefault();play(i);}   // Alt+Enter = 다시 듣기
+    });
+    function doCheck(){
+      stopPlayback();                    // grading always silences playback, mid-repeat included
+      const r=score(answerText(i),ta.value);
+      let html='<div class="score">정확도 '+r.pct+'% ('+r.correct+'/'+r.total+' 단어)</div>';
+      html+='<div class="diff">'+r.diff+'</div>';
+      if(r.extra.length)html+='<div class="extra">추가 입력: '+escapeHtml(r.extra.join(' '))+'</div>';
+      res.innerHTML=html;res.classList.add('show');
+      saveBest(i,r.pct);card.classList.add('done');
+      card.querySelector('.meta').textContent='#'+(i+1)+' · '+fmt(seg.start)+'–'+fmt(seg.end)+' · 최고 '+best[i]+'%';
+    }
+    card.querySelector('.check').onclick=doCheck;
+    card.querySelector('.revealall').onclick=toggleRevealAll;
+    card.querySelector('.reveal').onclick=()=>{
+      res.innerHTML='<div class="answer"><b>정답</b> '+escapeHtml(answerText(i))+(answers[i]!=null?' <span class="meta">(수정됨)</span>':'')+'</div>';
+      res.classList.add('show');
+    };
+    card.querySelector('.resetscore').onclick=()=>{
+      delete best[i];localStorage.setItem(SKEY,JSON.stringify(best));
+      updateProgress();updateRate();card.classList.remove('done');ta.value='';
+      res.classList.remove('show');res.innerHTML='';
+      card.querySelector('.meta').textContent='#'+(i+1)+' · '+fmt(seg.start)+'–'+fmt(seg.end);
+    };
+    card.querySelector('.editans').onclick=()=>{
+      res.innerHTML='';
+      const ea=document.createElement('textarea');ea.value=answerText(i);ea.style.height='calc(1.55em*3 + 20px)';
+      const bar=document.createElement('div');bar.className='row';bar.style.marginTop='8px';
+      bar.innerHTML='<button class="btn dark save">저장</button><button class="btn cancel">취소</button><button class="btn orig">원본 복원</button>';
+      res.appendChild(ea);res.appendChild(bar);res.classList.add('show');
+      bar.querySelector('.save').onclick=()=>{setAnswer(i,ea.value);res.classList.remove('show');res.innerHTML='';render();};
+      bar.querySelector('.cancel').onclick=()=>{res.classList.remove('show');res.innerHTML='';};
+      bar.querySelector('.orig').onclick=()=>{setAnswer(i,'');ea.value=segments[i].text;};
+    };
+    if(showAllAnswers){
+      res.innerHTML='<div class="answer"><b>정답</b> '+escapeHtml(answerText(i))+(answers[i]!=null?' <span class="meta">(수정됨)</span>':'')+'</div>';
+      res.classList.add('show');
+    }
+    list.appendChild(card);
+  });
+}
+function fmt(t){const m=Math.floor(t/60),s=Math.floor(t%60);return m+':'+String(s).padStart(2,'0');}
+
+/* ---- AI prompt modal ---- */
+const DEFAULT_PROMPT=
+`아래는 영어 딕테이션 스크립트야. 문장마다 #번호가 붙어 있고, 학술 지문(Lecture)·대화(Conversation)와 문제 안내(Question)가 섞여 있어.
+
+"Hackers Test ~", "Question ~", "Listen to a talk/conversation ~" 같은 단순 타이틀·문제 안내 문장은 전부 제외하고, 실제 지문의 본문이 시작되는 문장부터 끝나는 문장까지만 구역을 나눠 줘.
+
+결과는 아래 형식으로만 작성해 줘.
+
+[구역 번호. 주제]
+- 추천 범위: #시작번호 ~ #종료번호
+- 시작 문장: (첫 문장 일부)
+- 종료 문장: (끝 문장 일부)
+- 주요 내용: (한 줄 요약)`;
+const PKEY='audiodict_prompt';
+const pmodal=document.getElementById('pmodal'), ptext=document.getElementById('ptext');
+document.querySelectorAll('.obtn').forEach(b=>b.onclick=()=>{
+  ptext.value=localStorage.getItem(PKEY)||DEFAULT_PROMPT;
+  pmodal.classList.remove('hidden');
+});
+ptext.oninput=()=>localStorage.setItem(PKEY,ptext.value);
+document.getElementById('pclose').onclick=()=>pmodal.classList.add('hidden');
+pmodal.onclick=e=>{if(e.target===pmodal)pmodal.classList.add('hidden');};
+document.getElementById('pcopy').onclick=async()=>{
+  const script=segments.length
+    ? '\n\n[스크립트 내용]\n'+segments.map((s,i)=>'#'+(i+1)+' '+answerText(i)).join('\n')
+    : '';
+  const txt=ptext.value+script;
+  try{await navigator.clipboard.writeText(txt);}
+  catch(e){ptext.focus();ptext.select();document.execCommand('copy');}
+  const b=document.getElementById('pcopy');
+  b.textContent='✓';setTimeout(()=>b.textContent='⧉',1200);
+};
+
+/* ---- bulk-delete announcement sentences (▲) ---- */
+const DEFAULT_EXCLUDE=
+`아래는 영어 딕테이션 스크립트야.
+
+이 중에서 실제 지문 본문이 아닌 문장 — 타이틀("Hackers Test ~"), 문제 안내("Question ~", "3 to 4" 등), "Listen to a talk/conversation ~" 같은 안내 문장 — 만 전부 골라 줘.
+
+번호 없이, 문장 그대로 한 줄에 하나씩만 출력해 줘. 다른 설명은 붙이지 마.`;
+const XKEY='audiodict_exclude_v2';
+const xmodal=document.getElementById('xmodal'), xtext=document.getElementById('xtext');
+document.querySelectorAll('.tbtn').forEach(b=>b.onclick=()=>{
+  xtext.value=localStorage.getItem(XKEY)||DEFAULT_EXCLUDE;
+  xmodal.classList.remove('hidden');
+});
+xtext.oninput=()=>localStorage.setItem(XKEY,xtext.value);
+document.getElementById('xcopy').onclick=async()=>{
+  const script=segments.length
+    ? '\n\n[스크립트 내용]\n'+segments.map((s,i)=>answerText(i)).join('\n')
+    : '';
+  const txt=xtext.value+script;
+  try{await navigator.clipboard.writeText(txt);}
+  catch(e){xtext.focus();xtext.select();document.execCommand('copy');}
+  const b=document.getElementById('xcopy');
+  b.textContent='✓';setTimeout(()=>b.textContent='⧉',1200);
+};
+document.getElementById('xclose').onclick=()=>xmodal.classList.add('hidden');
+xmodal.onclick=e=>{if(e.target===xmodal)xmodal.classList.add('hidden');};
+document.getElementById('xapply').onclick=()=>{
+  if(!segments.length){alert('삭제할 문장이 없습니다. 먼저 오디오를 여세요.');return;}
+  const pats=xtext.value.split(/\n/)
+    .map(l=>l.replace(/^[\s*\-•·]+/,'').trim())
+    .filter(Boolean)
+    .map(l=>normTokens(l).join(' '))
+    .filter(Boolean);
+  if(!pats.length)return;
+  const del=[];
+  segments.forEach((s,i)=>{
+    const t=normTokens(answerText(i)).join(' ');
+    if(pats.some(p=>t===p||t.startsWith(p+' ')))del.push(i);
+  });
+  if(!del.length){alert('일치하는 문장이 없습니다.');return;}
+  if(!confirm(del.length+'개 문장을 삭제할까요? (예: #'+del.slice(0,8).map(i=>i+1).join(', #')+(del.length>8?' …':'')+')'))return;
+  stopPlayback();
+  for(let k=del.length-1;k>=0;k--){        // delete from the back so indexes stay valid
+    const i=del[k];
+    segments.splice(i,1);
+    best=reindex(best,i);answers=reindex(answers,i);
+    reindexSections(i);
+  }
+  selSet.clear();updateSelbar();
+  persistAll();render();updateProgress();updateRate();
+  xmodal.classList.add('hidden');
+};
+
+/* ---- Esc closes modals; Ctrl/⌘+Enter jumps to the next dictation input ---- */
+document.addEventListener('keydown',e=>{
+  if(e.key==='Escape'){
+    const pm=document.getElementById('pmodal'),xm=document.getElementById('xmodal');
+    if(!pm.classList.contains('hidden'))pm.classList.add('hidden');
+    if(!xm.classList.contains('hidden'))xm.classList.add('hidden');
+    return;
+  }
+  if(!(e.key==='Enter'&&(e.ctrlKey||e.metaKey)))return;
+  if(document.getElementById('practice').classList.contains('hidden'))return;
+  const tas=[...document.querySelectorAll('#list .card > textarea')];
+  if(!tas.length)return;
+  e.preventDefault();
+  let cur=tas.indexOf(document.activeElement);
+  if(cur<0){                                       // focus on a button (e.g. 채점) → use its card as the anchor
+    const card=document.activeElement&&document.activeElement.closest?document.activeElement.closest('.card'):null;
+    if(card)cur=tas.indexOf(card.querySelector('textarea'));
+  }
+  const target=e.shiftKey?tas[Math.max(cur-1,0)]:tas[Math.min(cur+1,tas.length-1)]; // Ctrl+Enter=next, +Shift=prev
+  target.focus();
+  target.scrollIntoView({block:'center',behavior:'smooth'});
+});
+
+/* ---- password lock (client-side) ---- */
+const PWKEY='audiodict_pw', PW_DEFAULT='song';
+const curPw=()=>localStorage.getItem(PWKEY)||PW_DEFAULT;
+const pwInput=document.getElementById('pwInput'), pwMsg=document.getElementById('pwMsg');
+function tryUnlock(){
+  if(pwInput.value===curPw()){
+    document.getElementById('lock').classList.add('hidden');
+    pwInput.value='';pwMsg.textContent='';
+  }else{
+    pwMsg.textContent='비밀번호가 올바르지 않습니다.';
+    pwInput.value='';pwInput.focus();
+  }
+}
+document.getElementById('pwEnter').onclick=tryUnlock;
+pwInput.addEventListener('keydown',e=>{if(e.key==='Enter')tryUnlock();});
+document.getElementById('pwReset').onclick=()=>{
+  if(!confirm('비밀번호를 초기값(song)으로 되돌릴까요?'))return;
+  localStorage.removeItem(PWKEY);
+  pwMsg.textContent='';
+  alert('비밀번호가 "song"으로 초기화되었습니다.');
+  pwInput.focus();
+};
+document.getElementById('pwChange').onclick=()=>{
+  const npw=prompt('새 비밀번호를 입력하세요.');
+  if(npw===null)return;
+  const v=npw.trim();
+  if(!v){alert('비밀번호는 비워 둘 수 없습니다.');return;}
+  const again=prompt('확인을 위해 한 번 더 입력하세요.');
+  if(again===null)return;
+  if(again.trim()!==v){alert('두 입력이 일치하지 않습니다.');return;}
+  localStorage.setItem(PWKEY,v);
+  alert('비밀번호가 변경되었습니다.');
+};
+pwInput.focus();
+
+renderSaved();
+</script>
+</body>
+</html>
